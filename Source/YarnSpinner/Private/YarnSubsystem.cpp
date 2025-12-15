@@ -4,6 +4,7 @@
 #include "YarnSubsystem.h"
 
 #include "DisplayLine.h"
+#include "YarnDeveloperSettings.h"
 #include "Engine/ObjectLibrary.h"
 #include "Library/YarnCommandLibrary.h"
 #include "Library/YarnFunctionLibrary.h"
@@ -26,6 +27,10 @@ UYarnSubsystem::UYarnSubsystem()
     YarnCommandObjectLibrary->bRecursivePaths = true;
     YarnFunctionObjectLibrary->LoadAssetDataFromPath(TEXT("/Game"));
     YarnCommandObjectLibrary->LoadAssetDataFromPath(TEXT("/Game"));
+	YarnFunctionObjectLibrary->bHasBlueprintClasses = true;
+	YarnCommandObjectLibrary->bHasBlueprintClasses = true;
+	YarnFunctionObjectLibrary->ObjectBaseClass = UYarnFunctionLibrary::StaticClass();
+	YarnCommandObjectLibrary->ObjectBaseClass = UYarnCommandLibrary::StaticClass();
 
     YarnFunctionRegistry = NewObject<UYarnLibraryRegistry>(this, "YarnFunctionRegistry");
 }
@@ -33,6 +38,7 @@ UYarnSubsystem::UYarnSubsystem()
 
 void UYarnSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE("UYarnSubsystem::Initialize");
     YS_LOG_FUNCSIG
     Super::Initialize(Collection);
 
@@ -47,25 +53,33 @@ void UYarnSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     Filter.ClassNames.Add(UBlueprint::StaticClass()->GetFName());
     Filter.ClassNames.Add(UBlueprintGeneratedClass::StaticClass()->GetFName());
 #endif
+	
+	Filter.bRecursivePaths = true;
+	Filter.PackagePaths.Add(FName(GetDefault<UYarnDeveloperSettings>()->BlueprintImportPath.Path));
+	
     FAssetRegistryModule::GetRegistry().GetAssets(Filter, Blueprints);
 
     for (auto Asset : Blueprints)
     {
-        if (UObject* BPObj = Cast<UObject>(Asset.GetAsset()))
+#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 1
+        if (Asset.AssetClassPath == UBlueprint::StaticClass()->GetClassPathName())
+#else
+    	if (Asset.AssetClass == "Blueprint")
+#endif
         {
-            UBlueprint* BP = Cast<UBlueprint>(StaticLoadObject(UBlueprint::StaticClass(), nullptr, *BPObj->GetPathName()));
+            UBlueprint* BP = Cast<UBlueprint>(Asset.GetAsset());
             if (BP && BP->GeneratedClass && BP->GeneratedClass->GetDefaultObject())
             {
                 // if (BP->GetBlueprintClass()->IsChildOf<AYarnFunctionLibrary>())
                 if (auto YFL = UYarnFunctionLibrary::FromBlueprint(BP))
                 {
-                    YS_LOG_FUNC("FOUNDDDD OOOONNNNEEE")
                     LibRefs.Add(*BP->GeneratedClass);
                 }
             }
         }
     }
 
+#if !UE_BUILD_SHIPPING
     for (auto Lib : LibRefs)
     {
         if (Lib->FindFunctionByName(FName("MyQuickActorFunction")))
@@ -88,6 +102,7 @@ void UYarnSubsystem::Initialize(FSubsystemCollectionBase& Collection)
             }
         }
     }
+#endif
 
 }
 

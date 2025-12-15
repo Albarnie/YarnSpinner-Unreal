@@ -5,6 +5,7 @@
 
 #include "K2Node_FunctionEntry.h"
 #include "K2Node_FunctionResult.h"
+#include "YarnDeveloperSettings.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Internationalization/Regex.h"
 #include "Library/YarnCommandLibrary.h"
@@ -17,6 +18,7 @@
 #include "Misc/YarnValueHelpers.h"
 #include "Misc/YSLogging.h"
 
+static const FName BlueprintAssetName = TEXT("Blueprint");
 
 UYarnLibraryRegistryEditor::UYarnLibraryRegistryEditor()
 {
@@ -50,13 +52,14 @@ void UYarnLibraryRegistryEditor::BeginDestroy()
 
 UBlueprint* UYarnLibraryRegistryEditor::GetYarnFunctionLibraryBlueprint(const FAssetData& AssetData)
 {
-    UBlueprint* BP = Cast<UBlueprint>(AssetData.GetAsset());
-
-    if (!BP)
+    if (AssetData.AssetClass != BlueprintAssetName)
     {
         // YS_LOG_FUNC("Could not cast asset to UBlueprint")
         return nullptr;
     }
+	
+    UBlueprint* BP = Cast<UBlueprint>(AssetData.GetAsset());
+	
     if (!BP->ParentClass->IsChildOf<UYarnFunctionLibrary>())
     {
         // YS_LOG_FUNC("Blueprint is not a child of UYarnFunctionLibrary")
@@ -74,13 +77,13 @@ UBlueprint* UYarnLibraryRegistryEditor::GetYarnFunctionLibraryBlueprint(const FA
 
 UBlueprint* UYarnLibraryRegistryEditor::GetYarnCommandLibraryBlueprint(const FAssetData& AssetData)
 {
-    UBlueprint* BP = Cast<UBlueprint>(AssetData.GetAsset());
-
-    if (!BP)
-    {
-        // YS_LOG_FUNC("Could not cast asset to UBlueprint")
-        return nullptr;
-    }
+	if (AssetData.AssetClass != BlueprintAssetName)
+	{
+		// YS_LOG_FUNC("Could not cast asset to UBlueprint")
+		return nullptr;
+	}
+	
+	UBlueprint* BP = Cast<UBlueprint>(AssetData.GetAsset());
     if (!BP->ParentClass->IsChildOf<UYarnCommandLibrary>())
     {
         // YS_LOG_FUNC("Blueprint is not a child of UYarnCommandLibrary")
@@ -107,24 +110,25 @@ void UYarnLibraryRegistryEditor::SaveYSLS()
 
 void UYarnLibraryRegistryEditor::FindFunctionsAndCommands()
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE("UYarnLibraryRegistryEditor::FindFunctionsAndCommands")
     YS_LOG_FUNCSIG
     YS_LOG("Project content dir: %s", *FPaths::ProjectContentDir());
 
-    TArray<FAssetData> ExistingAssets = FYarnAssetHelpers::FindAssetsInRegistryByPackagePath<UBlueprint>(FPaths::GetPath(TEXT("/Game/")));
+    TArray<FAssetData> ExistingAssets = FYarnAssetHelpers::FindAssetsInRegistryByPackagePath<UBlueprint>(GetDefault<UYarnDeveloperSettings>()->BlueprintImportPath.Path, UBlueprint::StaticClass());
     // TArray<FAssetData> ExistingAssets = FYarnAssetHelpers::FindAssetsInRegistryEditor<UBlueprint>();
     // TArray<FAssetData> ExistingAssets = FYarnAssetHelpers::FindAssetsInRegistryByPackagePath<UBlueprint>(FPaths::ProjectContentDir());
     // TArray<FAssetData> ExistingAssets = FYarnAssetHelpers::FindAssetsInRegistryByPackagePath<UBlueprint>(FPaths::GetPath(TEXT("/")));
 
     for (auto Asset : ExistingAssets)
     {
-        YS_LOG_FUNC("Found Blueprint asset: %s (%s) %s", *Asset.GetFullName(), *Asset.GetPackage()->GetName(), *Asset.GetAsset()->GetPathName())
-        if (UBlueprint* BP = GetYarnFunctionLibraryBlueprint(Asset))
+        YS_LOG_FUNC("Found Blueprint asset: %s (%s) %s", *Asset.GetFullName(), *Asset.GetPackage()->GetName(), *Asset.PackagePath.ToString())
+        if (UBlueprint* YarnFunctionLibrary = GetYarnFunctionLibraryBlueprint(Asset))
         {
-            ImportFunctions(BP);
+            ImportFunctions(YarnFunctionLibrary);
         }
-        if (UBlueprint* BP = GetYarnCommandLibraryBlueprint(Asset))
+    	else if (UBlueprint* YarnCommandLibrary = GetYarnCommandLibraryBlueprint(Asset))
         {
-            ImportCommands(BP);
+            ImportCommands(YarnCommandLibrary);
         }
     }
 
@@ -379,11 +383,12 @@ void UYarnLibraryRegistryEditor::ImportFunctions(UBlueprint* YarnFunctionLibrary
                 bIsValid = false;
                 YS_WARN("Function '%s' must have exactly one return parameter named '%s'.", *FuncDetails.Name.ToString(), *GYSFunctionReturnParamName.ToString())
             }
-            if (FuncDetails.OutParam.IsSet() && FuncDetails.OutParam->Name != GYSFunctionReturnParamName)
+            else if (FuncDetails.OutParam.IsSet() && FuncDetails.OutParam->Name != GYSFunctionReturnParamName)
             {
                 bIsValid = false;
                 YS_WARN("Function '%s' must have exactly one return parameter named '%s'.", *FuncDetails.Name.ToString(), *GYSFunctionReturnParamName.ToString())
             }
+        	
             if (FuncMeta.InvalidParams.Num() > 0)
             {
                 bIsValid = false;
@@ -546,6 +551,20 @@ void UYarnLibraryRegistryEditor::RemoveCommands(UBlueprint* YarnCommandLibrary)
         CommandLibraries.Remove(YarnCommandLibrary);
     }
 }
+bool UYarnLibraryRegistryEditor::IsValidBlueprintAsset(const FAssetData& AssetData)
+{
+#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 1
+	if (AssetData.AssetClassPath != UBlueprint::StaticClass()->GetClassPathName())
+#else
+	if (AssetData.AssetClass != "BlueprintAssetName")
+#endif
+		return false;
+	
+	if (!AssetData.PackagePath.ToString().StartsWith(GetDefault<UYarnDeveloperSettings>()->BlueprintImportPath.Path))
+		return false;
+	
+	return true;
+}
 
 
 void UYarnLibraryRegistryEditor::OnAssetRegistryFilesLoaded()
@@ -560,65 +579,43 @@ void UYarnLibraryRegistryEditor::OnAssetAdded(const FAssetData& AssetData)
 {
     // Ignore this until the registry has finished loading the first time.
     if (!bRegistryEditorFilesLoaded)
-        return;
+		return;
 
-    YS_LOG_FUNCSIG
-
-    if (UBlueprint* BP = GetYarnFunctionLibraryBlueprint(AssetData))
-    {
-        ImportFunctions(BP);
-        SaveYSLS();
-    }
-    if (UBlueprint* BP = GetYarnCommandLibraryBlueprint(AssetData))
-    {
-        ImportCommands(BP);
-        SaveYSLS();
-    }
+	TryUpdateAsset(AssetData);
 }
 
 
 void UYarnLibraryRegistryEditor::OnAssetRemoved(const FAssetData& AssetData)
 {
-    if (UBlueprint* BP = GetYarnFunctionLibraryBlueprint(AssetData))
-    {
-        RemoveFunctions(BP);
-        SaveYSLS();
-    }
-    if (UBlueprint* BP = GetYarnCommandLibraryBlueprint(AssetData))
-    {
-        RemoveCommands(BP);
-        SaveYSLS();
-    }
+	TryUpdateAsset(AssetData);
 }
 
 
 void UYarnLibraryRegistryEditor::OnAssetUpdated(const FAssetData& AssetData)
 {
-    if (UBlueprint* BP = GetYarnFunctionLibraryBlueprint(AssetData))
-    {
-        UpdateFunctions(BP);
-        SaveYSLS();
-    }
-    if (UBlueprint* BP = GetYarnCommandLibraryBlueprint(AssetData))
-    {
-        UpdateCommands(BP);
-        SaveYSLS();
-    }
+	TryUpdateAsset(AssetData);
 }
 
 
 void UYarnLibraryRegistryEditor::OnAssetRenamed(const FAssetData& AssetData, const FString& String)
 {
-    if (UBlueprint* BP = GetYarnFunctionLibraryBlueprint(AssetData))
-    {
-        UpdateFunctions(BP);
-        SaveYSLS();
-    }
-    if (UBlueprint* BP = GetYarnCommandLibraryBlueprint(AssetData))
-    {
-        UpdateCommands(BP);
-        SaveYSLS();
-    }
+	TryUpdateAsset(AssetData);
+}
+void UYarnLibraryRegistryEditor::TryUpdateAsset(const FAssetData& AssetData)
+{
+	if (!IsValidBlueprintAsset(AssetData))
+		return;
+	
+	if (UBlueprint* FunctionBP = GetYarnFunctionLibraryBlueprint(AssetData))
+	{
+		UpdateFunctions(FunctionBP);
+		SaveYSLS();
+	}
+	else if (UBlueprint* CommandBP = GetYarnCommandLibraryBlueprint(AssetData))
+	{
+		UpdateCommands(CommandBP);
+		SaveYSLS();
+	}
 }
 
 

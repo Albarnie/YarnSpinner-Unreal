@@ -15,6 +15,7 @@ public class YarnSpinner : ModuleRules
                 "CoreUObject",
                 "AssetRegistry",
                 "GameplayTasks",
+                "DeveloperSettings"
             });
 
         PrivateDependencyModuleNames.AddRange(

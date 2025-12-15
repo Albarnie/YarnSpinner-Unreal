@@ -64,11 +64,15 @@ private:
     void RemoveFunctions(UBlueprint* YarnFunctionLibrary);
     // Clear functions and references for a given Blueprint
     void RemoveCommands(UBlueprint* YarnCommandLibrary);
+
+    static bool IsValidBlueprintAsset(const FAssetData& AssetData);
     
     void OnAssetRegistryFilesLoaded();
     void OnAssetAdded(const FAssetData& AssetData);
     void OnAssetRemoved(const FAssetData& AssetData);
     void OnAssetUpdated(const FAssetData& AssetData);
     void OnAssetRenamed(const FAssetData& AssetData, const FString& String);
+	
+	void TryUpdateAsset (const FAssetData& AssetData);
     void OnStartGameInstance(UGameInstance* GameInstance);
 };

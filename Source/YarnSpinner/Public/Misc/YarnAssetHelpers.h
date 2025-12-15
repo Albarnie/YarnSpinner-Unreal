@@ -50,6 +50,14 @@ TArray<FAssetData> FYarnAssetHelpers::FindAssetsInRegistryByPackagePath(const FN
 {
     FARFilter AssetFilter = GetClassPathFilter<AssetClass>(BaseClass);
     AssetFilter.PackagePaths.Add(SearchPackage);
+	
+#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 1
+	AssetFilter.ClassPaths.Add(BaseClass->GetClassPathName());
+#else
+	AssetFilter.ClassNames.Add(BaseClass->GetFName());
+#endif
+
+	AssetFilter.bRecursiveClasses = true;
     return FindAssets(AssetFilter);
 }
 
