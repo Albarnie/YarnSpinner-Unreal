@@ -66,7 +66,7 @@ public:
 
     /** The file this data table was imported from, may be empty */
 	UPROPERTY(VisibleAnywhere, Instanced, Category=ImportSettings)
-	TObjectPtr<class UAssetImportData> AssetImportData;
+	class UAssetImportData* AssetImportData;
 #endif
 
 private:

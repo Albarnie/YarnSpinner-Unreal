@@ -9,27 +9,51 @@
 #include "Misc/YarnAssetHelpers.h"
 #include "Misc/YSLogging.h"
 
+static TAutoConsoleVariable<bool> CVarUseFastAssetGather(
+	TEXT("yarn.UseFastAssetGather"),
+	true,
+	TEXT("Use direct asset gathering instead of searching all assets. May be faster.\n")
+	TEXT("false: use old searching behavior (check all assets)\n")
+	TEXT("true: use new behavior (query assets directly)\n"),
+	ECVF_Default);
 
 void UYarnProject::Init()
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE("UYarnProject::Init");
+	
     // Find related line assets
     LineAssets.Empty();
     FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
-    FARFilter Filter;
-    Filter.bRecursivePaths = true;
-    Filter.PackagePaths.Add("/Game");
-    TArray<FAssetData> AssetData;
-    AssetRegistryModule.Get().GetAssets(Filter, AssetData);
-    for (auto Asset : AssetData)
-    {
-        YS_LOG_FUNC("Found asset: %s", *Asset.AssetName.ToString());
-        auto LineId = FName(TEXT("line:") + Asset.AssetName.ToString());
-        if (Lines.Contains(LineId))
-        {
-            // TODO: if path contains a loc identifier, add to loc table
-            LineAssets.FindOrAdd(LineId).Add(TSoftObjectPtr<UObject>(Asset.ToSoftObjectPath()));
-        }
-    }
+	
+	if (CVarUseFastAssetGather.GetValueOnGameThread())
+	{
+		for (const TPair<FName, FString>& Line : Lines)
+		{
+			FAssetData AssetData = AssetRegistryModule.Get().GetAssetByObjectPath(*Line.Key.ToString().Right(5)); //Get the asset past the 'line:' prefix
+			if (AssetData.IsValid())
+			{
+				LineAssets.FindOrAdd(Line.Key).Add(TSoftObjectPtr<UObject>(AssetData.ToSoftObjectPath()));
+			}
+		}
+	}
+	else
+	{
+		FARFilter Filter;
+		Filter.bRecursivePaths = true;
+		Filter.PackagePaths.Add("/Game");
+		TArray<FAssetData> AssetData;
+		AssetRegistryModule.Get().GetAssets(Filter, AssetData);
+		for (auto Asset : AssetData)
+		{
+			YS_LOG_FUNC("Found asset: %s", *Asset.AssetName.ToString());
+			auto LineId = FName(TEXT("line:") + Asset.AssetName.ToString());
+			if (Lines.Contains(LineId))
+			{
+				// TODO: if path contains a loc identifier, add to loc table
+				LineAssets.FindOrAdd(LineId).Add(TSoftObjectPtr<UObject>(Asset.ToSoftObjectPath()));
+			}
+		}
+	}
 }
 
 
