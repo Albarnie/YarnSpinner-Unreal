@@ -1,40 +1,44 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+// SCP: 5K Copyright 2019 - 2025 Affray LLC
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "YarnProject.h"
+#include "Components/ActorComponent.h"
 
-class UYarnDialogueComponent;
 THIRD_PARTY_INCLUDES_START
 #include "YarnSpinnerCore/VirtualMachine.h"
 #include "YarnSpinnerCore/Library.h"
 #include "YarnSpinnerCore/Common.h"
 THIRD_PARTY_INCLUDES_END
 
-#include "DialogueRunner.generated.h"
+#include "YarnDialogueComponent.generated.h"
 
 DECLARE_DELEGATE(FYarnDialogueRunnerContinueDelegate);
 
-UCLASS()
-class YARNSPINNER_API ADialogueRunner : public AActor, public Yarn::ILogger, public Yarn::IVariableStorage
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FYarnDialogueOnRunLineDelegate, class ULine*, Line, const TArray<TSoftObjectPtr<UObject>>&, LineAssets);
+DECLARE_DYNAMIC_DELEGATE_RetVal_TwoParams(bool, FYarnDialogueOnRunCommandDelegate, const FString&, Command, const TArray<FString>&, Parameters);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FYarnDialogueOnRunOptionsDelegate, const TArray<class UOption*>&, Options);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FYarnDialogueStartedDelegate);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FYarnDialogueEndedDelegate);
+
+
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+class YARNSPINNER_API UYarnDialogueComponent : public UActorComponent, public Yarn::ILogger, public Yarn::IVariableStorage
 {
-    GENERATED_BODY()
-    
+	GENERATED_BODY()
+
 public:
-    // Sets default values for this actor's properties
-    ADialogueRunner();
+	// Sets default values for this component's properties
+	UYarnDialogueComponent();
 
 protected:
-    virtual void PreInitializeComponents() override;
-	
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Dialogue Runner")
-	UYarnDialogueComponent* DialogueComponent;
-    
+	// Called when the game starts
+	virtual void BeginPlay() override;
+
 public:
-    // Called every frame
-    virtual void Tick(float DeltaTime) override;
+	// Called every frame
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     UFUNCTION(BlueprintNativeEvent, Category="Yarn|Dialogue Runner")
     void OnDialogueStarted();
@@ -50,9 +54,6 @@ public:
 
     UFUNCTION(BlueprintNativeEvent, Category="Yarn|Dialogue Runner")
     void OnRunCommand(const FString& Command, const TArray<FString>& Parameters);
-	
-	UFUNCTION(Category="Yarn|Dialogue Runner")
-	bool OnRunCommandInternal(const FString& Command, const TArray<FString>& Parameters);
     
     UFUNCTION(BlueprintCallable, Category="Yarn|Dialogue Runner")
     void StartDialogue(FName NodeName);
@@ -70,6 +71,21 @@ public:
 
     UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category="Dialogue Runner")
     bool bRunSelectedOptionsAsLines = false;
+	
+	UPROPERTY(BlueprintAssignable, BlueprintCallable, Category="Yarn|Dialogue Runner")
+	FYarnDialogueOnRunLineDelegate OnRunLineDelegate;
+	UPROPERTY(BlueprintReadWrite, Category="Yarn|Dialogue Runner")
+	FYarnDialogueOnRunCommandDelegate OnRunCommandDelegate;
+	UPROPERTY(BlueprintAssignable, BlueprintCallable, Category="Yarn|Dialogue Runner")
+	FYarnDialogueOnRunOptionsDelegate OnRunOptionsDelegate;
+	UPROPERTY(BlueprintAssignable, BlueprintCallable, Category="Yarn|Dialogue Runner")
+	FYarnDialogueStartedDelegate OnDialogueStartedDelegate;
+	UPROPERTY(BlueprintAssignable, BlueprintCallable, Category="Yarn|Dialogue Runner")
+	FYarnDialogueEndedDelegate OnDialogueEndedDelegate;
+	
+	virtual void GetDisplayTextForLine(class ULine* Line, const Yarn::Line& YarnLine);
+	
+	bool bAutoContinue = false;
 
 private:
     TUniquePtr<Yarn::VirtualMachine> VirtualMachine;
@@ -77,6 +93,8 @@ private:
     TUniquePtr<Yarn::Library> Library;
 
     FYarnDialogueRunnerContinueDelegate ContinueDelegate;
+	
+	virtual void InitializeComponent() override;
 
     // ILogger
     virtual void Log(std::string Message, Type Severity = Type::INFO) override;
@@ -97,6 +115,4 @@ private:
     FString Blah;
 
     class UYarnSubsystem* YarnSubsystem() const;
-    
-    void GetDisplayTextForLine(class ULine* Line, const Yarn::Line& YarnLine);
 };

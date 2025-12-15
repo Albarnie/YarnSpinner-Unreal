@@ -4,6 +4,7 @@
 #include "DialogueRunner.h"
 #include "Line.h"
 #include "Option.h"
+#include "YarnDialogueComponent.h"
 #include "YarnSubsystem.h"
 #include "YarnSpinner.h"
 #include "Kismet/KismetInternationalizationLibrary.h"
@@ -20,6 +21,13 @@ ADialogueRunner::ADialogueRunner()
 {
     // Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
     PrimaryActorTick.bCanEverTick = true;
+	
+	DialogueComponent = CreateDefaultSubobject<UYarnDialogueComponent>(TEXT("DialogueComponent"));
+	
+	DialogueComponent->OnDialogueEndedDelegate.AddDynamic(this, &ADialogueRunner::OnDialogueEnded);
+	DialogueComponent->OnDialogueStartedDelegate.AddDynamic(this, &ADialogueRunner::OnDialogueStarted);
+	DialogueComponent->OnRunLineDelegate.AddDynamic(this, &ADialogueRunner::OnRunLine);
+	DialogueComponent->OnRunCommandDelegate.BindDynamic(this, &ADialogueRunner::OnRunCommandInternal);
 }
 
 
@@ -27,150 +35,6 @@ ADialogueRunner::ADialogueRunner()
 void ADialogueRunner::PreInitializeComponents()
 {
     Super::PreInitializeComponents();
-
-    if (!YarnProject)
-    {
-        UE_LOG(LogYarnSpinner, Error, TEXT("DialogueRunner can't initialize, because it doesn't have a Yarn Asset."));
-        return;
-    }
-
-    YarnProject->Init();
-
-    Yarn::Program Program{};
-
-    bool bParseSuccess = Program.ParsePartialFromArray(YarnProject->Data.GetData(), YarnProject->Data.Num());
-
-    if (!bParseSuccess)
-    {
-        UE_LOG(LogYarnSpinner, Error, TEXT("DialogueRunner can't initialize, because its Yarn Asset failed to load."));
-        return;
-    }
-
-    // Create the Library
-    Library = TUniquePtr<Yarn::Library>(new Yarn::Library(*this));
-
-    UYarnSubsystem* SS = YarnSubsystem();
-
-
-    // Create the VirtualMachine, supplying it with the loaded Program and
-    // configuring it to use our library, plus use this ADialogueRunner as the
-    // logger and the variable storage
-    // VirtualMachine = TUniquePtr<Yarn::VirtualMachine>(new Yarn::VirtualMachine(Program, *(Library), *this, *this));
-    VirtualMachine = TUniquePtr<Yarn::VirtualMachine>(new Yarn::VirtualMachine(Program, *this, *this));
-
-    VirtualMachine->LineHandler = [this](Yarn::Line& Line)
-    {
-        UE_LOG(LogYarnSpinner, Log, TEXT("Received line %s"), UTF8_TO_TCHAR(Line.LineID.c_str()));
-
-        // Get the Yarn line struct, and make a ULine out of it to use
-        ULine* LineObject = NewObject<ULine>(this);
-        LineObject->LineID = FName(Line.LineID.c_str());
-
-        GetDisplayTextForLine(LineObject, Line);
-
-        const TArray<TSoftObjectPtr<UObject>> LineAssets = YarnProject->GetLineAssets(LineObject->LineID);
-        YS_LOG_FUNC("Got %d line assets for line '%s'", LineAssets.Num(), *LineObject->LineID.ToString())
-
-        OnRunLine(LineObject, LineAssets);
-    };
-
-    VirtualMachine->OptionsHandler = [this](Yarn::OptionSet& OptionSet)
-    {
-        UE_LOG(LogYarnSpinner, Log, TEXT("Received %i options"), OptionSet.Options.size());
-
-        // Build a TArray for every option in this OptionSet
-        TArray<UOption*> Options;
-
-        for (auto Option : OptionSet.Options)
-        {
-            UE_LOG(LogYarnSpinner, Log, TEXT("- %i: %s"), Option.ID, UTF8_TO_TCHAR(Option.Line.LineID.c_str()));
-
-            UOption* Opt = NewObject<UOption>(this);
-            Opt->OptionID = Option.ID;
-
-            Opt->Line = NewObject<ULine>(Opt);
-            Opt->Line->LineID = FName(Option.Line.LineID.c_str());
-
-            GetDisplayTextForLine(Opt->Line, Option.Line);
-
-            Opt->bIsAvailable = Option.IsAvailable;
-
-            Opt->SourceDialogueRunner = this;
-
-            Options.Add(Opt);
-        }
-
-        OnRunOptions(Options);
-    };
-
-    VirtualMachine->DoesFunctionExist = [this](const std::string& FunctionName) -> bool
-    {
-        return YarnSubsystem()->GetYarnLibraryRegistry()->HasFunction(FName(UTF8_TO_TCHAR(FunctionName.c_str())));
-    };
-
-    VirtualMachine->GetExpectedFunctionParamCount = [this](const std::string& FunctionName) -> int
-    {
-        return YarnSubsystem()->GetYarnLibraryRegistry()->GetExpectedFunctionParamCount(FName(UTF8_TO_TCHAR(FunctionName.c_str())));
-    };
-
-    VirtualMachine->CallFunction = [this](const std::string& FunctionName, const std::vector<Yarn::Value>& Parameters) -> Yarn::Value
-    {
-        return YarnSubsystem()->GetYarnLibraryRegistry()->CallFunction(
-            FName(UTF8_TO_TCHAR(FunctionName.c_str())),
-            TArray<Yarn::Value>(Parameters.data(), Parameters.size())
-        );
-    };
-
-    VirtualMachine->CommandHandler = [this](Yarn::Command& Command)
-    {
-        UE_LOG(LogYarnSpinner, Log, TEXT("Received command \"%s\""), UTF8_TO_TCHAR(Command.Text.c_str()));
-
-        FString CommandText = FString(UTF8_TO_TCHAR(Command.Text.c_str()));
-
-        TArray<FString> CommandElements;
-        CommandText.ParseIntoArray(CommandElements, TEXT(" "));
-
-        if (CommandElements.Num() == 0)
-        {
-            TArray<FString> EmptyParameters;
-            UE_LOG(LogYarnSpinner, Error, TEXT("Command received, but was unable to parse it."));
-            OnRunCommand(FString("(unknown)"), EmptyParameters);
-            return;
-        }
-
-        FName CommandName = FName(CommandElements[0]);
-        CommandElements.RemoveAt(0);
-
-        auto Lib = YarnSubsystem()->GetYarnLibraryRegistry();
-
-        if (Lib->HasCommand(CommandName))
-        {
-            return Lib->CallCommand(
-                CommandName,
-                this,
-                CommandElements
-            );
-        }
-
-        // Haven't handled the function yet, so call the DialogueRunner's handler
-        OnRunCommand(CommandName.ToString(), CommandElements);
-    };
-
-    VirtualMachine->NodeStartHandler = [this](std::string NodeName)
-    {
-        UE_LOG(LogYarnSpinner, Log, TEXT("Received node start \"%s\""), UTF8_TO_TCHAR(NodeName.c_str()));
-    };
-
-    VirtualMachine->NodeCompleteHandler = [this](std::string NodeName)
-    {
-        UE_LOG(LogYarnSpinner, Log, TEXT("Received node complete \"%s\""), UTF8_TO_TCHAR(NodeName.c_str()));
-    };
-
-    VirtualMachine->DialogueCompleteHandler = [this]()
-    {
-        UE_LOG(LogYarnSpinner, Log, TEXT("Received dialogue complete"));
-        OnDialogueEnded();
-    };
 }
 
 
@@ -221,24 +85,7 @@ void ADialogueRunner::OnRunCommand_Implementation(const FString& Command, const 
 /** Starts running dialogue from the given node name. */
 void ADialogueRunner::StartDialogue(FName NodeName)
 {
-    if (VirtualMachine.IsValid() == false)
-    {
-        UE_LOG(LogYarnSpinner, Error, TEXT("DialogueRunner can't start node %s, because it failed to load a Yarn asset."), *NodeName.ToString());
-        return;
-    }
-
-    bool bNodeSelected = VirtualMachine->SetNode(TCHAR_TO_UTF8(*NodeName.ToString()));
-
-    if (bNodeSelected)
-    {
-        OnDialogueStarted();
-        ContinueDialogue();
-    }
-    else
-    {
-        UE_LOG(LogYarnSpinner, Error, TEXT("DialogueRunner can't start node %s, because a node with that name was not found."), *NodeName.ToString());
-        return;
-    }
+    DialogueComponent->StartDialogue(NodeName);
 }
 
 
@@ -247,50 +94,14 @@ void ADialogueRunner::ContinueDialogue()
 {
     YS_LOG_FUNCSIG
 
-    if (VirtualMachine->GetCurrentExecutionState() == Yarn::VirtualMachine::ExecutionState::ERROR)
-    {
-        UE_LOG(LogYarnSpinner, Error, TEXT("VirtualMachine is in an error state and cannot continue running."));
-        return;
-    }
-
-    VirtualMachine->Continue();
-
-    Yarn::VirtualMachine::ExecutionState State = VirtualMachine->GetCurrentExecutionState();
-
-    if (State == Yarn::VirtualMachine::ExecutionState::ERROR)
-    {
-        UE_LOG(LogYarnSpinner, Error, TEXT("VirtualMachine encountered an error."));
-        return;
-    }
+    DialogueComponent->ContinueDialogue();
 }
 
 
 /** Indicates to the dialogue runner that an option was selected. */
 void ADialogueRunner::SelectOption(UOption* Option)
 {
-    Yarn::VirtualMachine::ExecutionState State = this->VirtualMachine->GetCurrentExecutionState();
-
-    if (State != Yarn::VirtualMachine::ExecutionState::WAITING_ON_OPTION_SELECTION)
-    {
-        UE_LOG(LogYarnSpinner, Error, TEXT("Dialogue Runner received a call to SelectOption but it wasn't expecting a selection!"));
-        return;
-    }
-
-    UE_LOG(LogYarnSpinner, Log, TEXT("Selected option %i (%s)"), Option->OptionID, *Option->Line->LineID.ToString());
-
-    VirtualMachine->SetSelectedOption(Option->OptionID);
-
-    if (bRunSelectedOptionsAsLines)
-    {
-        const TArray<TSoftObjectPtr<UObject>> LineAssets = YarnProject->GetLineAssets(Option->Line->LineID);
-        YS_LOG_FUNC("Got %d line assets for line '%s'", LineAssets.Num(), *Option->Line->LineID.ToString())
-
-        OnRunLine(Option->Line, LineAssets);
-    }
-    else
-    {
-        ContinueDialogue();
-    }
+    DialogueComponent->SelectOption(Option);
 }
 
 
@@ -368,31 +179,11 @@ UYarnSubsystem* ADialogueRunner::YarnSubsystem() const
 
 void ADialogueRunner::GetDisplayTextForLine(ULine* Line, const Yarn::Line& YarnLine)
 {
-    const FName LineID = FName(YarnLine.LineID.c_str());
-
-    // This assumes that we only ever care about lines that actually exist in .yarn files (rather than allowing extra lines in .csv files)
-    if (!YarnProject || !YarnProject->Lines.Contains(LineID))
-    {
-        Line->DisplayText = FText::FromString(TEXT("(missing line!)"));
-        return;
-    }
-
-    const FText LocalisedDisplayText = FText::FromString(YarnProject->Lines[LineID]);
-
-    const FText NonLocalisedDisplayText = FText::FromString(YarnProject->Lines[LineID]);
-
-    // Apply substitutions
-    FFormatOrderedArguments FormatArgs;
-    for (auto Substitution : YarnLine.Substitutions)
-    {
-        FormatArgs.Emplace(FText::FromString(UTF8_TO_TCHAR(Substitution.c_str())));
-    }
-
-    const FText TextWithSubstitutions = (LocalisedDisplayText.IsEmptyOrWhitespace()) ? FText::Format(NonLocalisedDisplayText, FormatArgs) : FText::Format(LocalisedDisplayText, FormatArgs);
-
-    // TODO: add support for markup & context (speaker, target)
-
-    YS_LOG_FUNC("Setting line %s to display text '%s'", *LineID.ToString(), *TextWithSubstitutions.ToString())
-
-    Line->DisplayText = TextWithSubstitutions;
+    DialogueComponent->GetDisplayTextForLine(Line, YarnLine);
+}
+bool ADialogueRunner::OnRunCommandInternal(const FString& Command, const TArray<FString>& Parameters)
+{
+	OnRunCommand(Command, Parameters);
+	
+	return true;
 }

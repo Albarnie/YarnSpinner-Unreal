@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "Option.generated.h"
 
+class UYarnDialogueComponent;
 /**
  * 
  */
@@ -19,7 +20,7 @@ public:
 	ULine *Line;
 
 	UPROPERTY(BlueprintReadOnly, Category="Yarn Spinner")
-	class ADialogueRunner *SourceDialogueRunner;
+	TWeakObjectPtr<UYarnDialogueComponent> SourceDialogueRunner;
 
 	UFUNCTION(BlueprintCallable, Category="Yarn Spinner")
     void SelectOption();
