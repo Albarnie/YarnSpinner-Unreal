@@ -2,6 +2,7 @@
 
 #include "YarnAssetFactory.h"
 
+#include "IPluginManager.h"
 #include "ISourceControlModule.h"
 #include "ISourceControlOperation.h"
 #include "ISourceControlProvider.h"
@@ -30,6 +31,12 @@ THIRD_PARTY_INCLUDES_START
 #include <google/protobuf/util/json_util.h>
 #include <google/protobuf/util/type_resolver_util.h>
 THIRD_PARTY_INCLUDES_END
+
+static TAutoConsoleVariable<bool> CVarYarnDisableTextGather(
+	TEXT("yarn.DisableTextGather"),
+	false,
+	TEXT("Disable text gathering on yarn compile. Massively improves reimport time but will result in out-of-date localizationdata.\n"),
+	ECVF_Default);
 
 // google::protobuf::Message &from_json(google::protobuf::Message &msg, const std::string &json);
 
@@ -137,7 +144,8 @@ UObject* UYarnAssetFactory::FactoryCreateBinary(UClass* InClass, UObject* InPare
         YarnProject->SetYarnSources(SourceFiles);
     }
 
-    BuildLocalizationTarget(YarnProject, CompilerOutput);
+    if (!CVarYarnDisableTextGather.GetValueOnAnyThread())
+    	BuildLocalizationTarget(YarnProject, CompilerOutput);
 
     //    YarnAsset->PostEditChange();
     //    YarnAsset->MarkPackageDirty();
