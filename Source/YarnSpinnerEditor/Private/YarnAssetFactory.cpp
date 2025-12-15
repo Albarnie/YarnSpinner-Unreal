@@ -186,7 +186,8 @@ EReimportResult::Type UYarnAssetFactory::Reimport(UYarnProject* YarnProject)
 
 FString UYarnAssetFactory::YscPath()
 {
-    return FPaths::Combine(FPaths::ProjectPluginsDir(), FString(YSC_PATH));
+	const static FString YarnSpinnerPath = IPluginManager::Get().FindPlugin("YarnSpinner")->GetBaseDir();
+    return FPaths::Combine(YarnSpinnerPath, FString(YSC_PATH));
 }
 
 

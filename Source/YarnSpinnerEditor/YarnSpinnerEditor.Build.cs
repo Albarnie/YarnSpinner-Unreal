@@ -65,6 +65,7 @@ public class YarnSpinnerEditor : ModuleRules
 
     public string ToolPath(ReadOnlyTargetRules Target)
     {
-        return "YarnSpinner-Unreal/Tools/" + Target.Platform + "/";
+        
+        return "/Tools/" + Target.Platform + "/";
     }
 }
