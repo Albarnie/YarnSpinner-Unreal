@@ -138,7 +138,7 @@ void UYarnLibraryRegistryEditor::FindFunctionsAndCommands()
 
 void UYarnLibraryRegistryEditor::ExtractFunctionDataFromBlueprintGraph(UBlueprint* YarnFunctionLibrary, UEdGraph* Func, FYarnBlueprintLibFunction& FuncDetails, FYarnBlueprintLibFunctionMeta& FuncMeta, bool bExpectDialogueRunnerParam)
 {
-    YS_LOG("Function graph: '%s'", *Func->GetName())
+    YS_VERBOSE("Function graph: '%s'", *Func->GetName())
     FuncDetails.Library = YarnFunctionLibrary;
     FuncDetails.Name = Func->GetFName();
 
@@ -174,7 +174,7 @@ void UYarnLibraryRegistryEditor::ExtractFunctionDataFromBlueprintGraph(UBlueprin
     // Find function entry and return nodes, ensure they have a valid number of pins, etc
     for (auto Node : Func->Nodes)
     {
-        YS_LOG("Node: '%s' (Class: '%s', Title: '%s')", *Node->GetName(), *Node->GetClass()->GetName(), *Node->GetNodeTitle(ENodeTitleType::ListView).ToString())
+        YS_VERBOSE("Node: '%s' (Class: '%s', Title: '%s')", *Node->GetName(), *Node->GetClass()->GetName(), *Node->GetNodeTitle(ENodeTitleType::ListView).ToString())
         if (Node->IsA(UK2Node_FunctionEntry::StaticClass()))
         {
             auto EntryNode = CastChecked<UK2Node_FunctionEntry>(Node);
@@ -194,12 +194,12 @@ void UYarnLibraryRegistryEditor::ExtractFunctionDataFromBlueprintGraph(UBlueprin
                 // YS_LOG("CONST FUNCTION")
             }
 
-            YS_LOG("Node is a function entry node with %d pins", Node->Pins.Num())
+            YS_VERBOSE("Node is a function entry node with %d pins", Node->Pins.Num())
             for (auto Pin : Node->Pins)
             {
                 auto& Category = Pin->PinType.PinCategory;
                 auto& SubCategory = Pin->PinType.PinSubCategory;
-                YS_LOG("PinName: '%s', Category: '%s', SubCategory: '%s'", *Pin->PinName.ToString(), *Category.ToString(), *SubCategory.ToString())
+                YS_VERBOSE("PinName: '%s', Category: '%s', SubCategory: '%s'", *Pin->PinName.ToString(), *Category.ToString(), *SubCategory.ToString())
                 if (bExpectDialogueRunnerParam && Pin->PinName == FName(TEXT("DialogueRunner")) && Category == FName(TEXT("object")))
                 {
                     FuncMeta.bHasDialogueRunnerRefParam = true;
@@ -234,11 +234,11 @@ void UYarnLibraryRegistryEditor::ExtractFunctionDataFromBlueprintGraph(UBlueprin
                     FuncMeta.InvalidParams.Add(Pin->PinName.ToString());
                 }
             }
-            YS_LOG("Added %d parameters to function details", FuncDetails.InParams.Num())
+            YS_VERBOSE("Added %d parameters to function details", FuncDetails.InParams.Num())
         }
         else if (Node->IsA(UK2Node_FunctionResult::StaticClass()))
         {
-            YS_LOG("Node is a function result node with %d pins", Node->Pins.Num())
+            YS_VERBOSE("Node is a function result node with %d pins", Node->Pins.Num())
             for (auto Pin : Node->Pins)
             {
                 auto& Category = Pin->PinType.PinCategory;
